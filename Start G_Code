@@ -1,0 +1,86 @@
+[gcode_macro START_PRINT]
+description: Macro de démarrage de l'impression
+variable_state: 'Prepare'
+variable_record_extruder_temp: 0
+variable_max_record_extruder_temp: 0
+gcode:
+    {% set bedtemp = params.BED_TEMP|default(60)|int %}
+    {% set hotendtemp = params.EXTRUDER_TEMP|default(200)|int %}
+    {% set heatsoak = params.HEATSOAK|default(True)|int %}
+    {% set heatsoak_time = printer['gcode_macro _global_var'].heat_soak_time|default(0)|int %} # takes heatsoak time from global variables
+    {% set mesh_name = "default" %}
+    {% set mesh_calibrate_temp = printer['gcode_macro _global_var'].bed_mesh_calibrate_target_temp|int %}
+    {% set extruder_target_temp = hotendtemp|int %}
+    {% set bed_target_temp = bedtemp|int %}
+
+    M400
+
+    CLEAR_PAUSE
+
+    # set minimum temperature to heat to mesh calibrate temperature
+    {% if bed_target_temp <= mesh_calibrate_temp %}
+        {% set bed_target_temp = mesh_calibrate_temp %}
+    {% endif %}
+
+    G90
+    {% if state == 'Prepare' %}
+
+        {action_respond_info("Prepare!")}
+
+        {% if printer.toolhead.homed_axes|lower != "xyz" %}
+            G28
+        {% endif %}
+
+        {% if printer['filament_switch_sensor filament_sensor'].enable == True and
+              printer['filament_switch_sensor filament_sensor'].filament_detected != True
+        %}
+            M117 No filament!!!
+            {action_respond_info("Please Insert filament in Sensor!")}
+            CANCEL_PRINT
+        {% endif %}
+
+        {action_respond_info("Check Heating!")}
+
+        {% if printer.heater_bed.temperature < bed_target_temp %}
+            M117 Bed heating...
+            {action_respond_info("Bed heating...")}
+            M190 S{bed_target_temp}
+        {% endif %}
+
+        {% if printer.quad_gantry_level.applied|lower != 'true' %}
+            M117 QGL
+            QUAD_GANTRY_LEVEL
+            M117 Home Z after QGL
+            G28 Z # And once again after QGL, important..
+        {% endif %}
+        M117 Bed Mesh
+        BED_MESH_PROFILE LOAD=default
+
+        {% if printer.extruder.temperature < extruder_target_temp %}
+            M117 Nozzle heating...
+            {action_respond_info("Nozzle heating...")}
+            M109 S{extruder_target_temp} 
+        {% endif %}
+        
+        M117 Purge Line
+
+        G1 Z10 F3000 
+        G1 X0 Y0 F3000
+        G1 Z0.3 F3000
+        G92 E0
+        G1 X0.1 Y20 Z0.3 F5000.0
+        G1 X0.1 Y350.0 Z0.3 F1500.0 E15
+        G1 X0.4 Y350.0 Z0.3 F5000.0
+        G1 X0.4 Y60 Z0.3 F1500.0 E30
+        G92 E0
+        G1 Z10 F3000
+        G1 X10 Y10 F3000
+        G1 Z0.3 F3000
+        
+        SET_GCODE_VARIABLE MACRO=START_PRINT VARIABLE=state VALUE='"Start"' 
+        UPDATE_DELAYED_GCODE ID=_print_start_wait DURATION=0.5
+
+    {% elif state == 'Start' %}
+        M117 Printing now!!!
+        {action_respond_info("Start!")}
+    {% endif %}
